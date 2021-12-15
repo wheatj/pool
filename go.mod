@@ -1,4 +1,4 @@
-module github.com/silenceper/pool
+module github.com/wheatj/pool
 
 go 1.13
 
