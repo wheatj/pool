@@ -8,14 +8,14 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/silenceper/pool"
+	"github.com/wheatj/pool"
 )
 
 const addr string = "127.0.0.1:8080"
 
 func main() {
-	c := make(chan os.Signal)
-	signal.Notify(c, os.Interrupt, os.Kill, syscall.SIGUSR1, syscall.SIGUSR2)
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt, syscall.SIGUSR1, syscall.SIGUSR2)
 	go server()
 	//等待tcp server启动
 	time.Sleep(2 * time.Second)
@@ -46,10 +46,15 @@ func client() {
 	p, err := pool.NewChannelPool(poolConfig)
 	if err != nil {
 		fmt.Println("err=", err)
+		return
 	}
 
 	//从连接池中取得一个连接
 	v, err := p.Get()
+	if err != nil {
+		fmt.Println("err=", err)
+		return 
+	}
 
 	//do something
 	//conn=v.(net.Conn)

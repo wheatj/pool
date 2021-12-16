@@ -80,11 +80,24 @@ func NewChannelPool(poolConfig *Config) (Pool, error) {
 	}
 
 	for i := 0; i < poolConfig.InitialCap; i++ {
-		conn, err := c.factory()
-		if err != nil {
+		var conn interface{}
+		var err error
+		var j = 0
+
+		for ; j < 3; j++ { //尝试三次
+			conn, err = c.factory()
+			if err == nil {//网络环境不好的情况下，有可能出现失败，比较好的办法是三次尝试
+				// c.Release()
+				// return nil, fmt.Errorf("factory is not able to fill the pool: %s", err)
+				break
+			}
+		}
+		if j == 3 {
 			c.Release()
 			return nil, fmt.Errorf("factory is not able to fill the pool: %s", err)
+			
 		}
+		
 		c.conns <- &idleConn{conn: conn, t: time.Now()}
 	}
 
@@ -130,8 +143,8 @@ func (c *channelPool) Get() (interface{}, error) {
 		default:
 			c.mu.Lock()
 			log.Debugf("openConn %v %v", c.openingConns, c.maxActive)
-			if c.openingConns >= c.maxActive {
-				req := make(chan connReq, 1)
+			if c.openingConns >= c.maxActive {//如果连接池中没有可用连接， 且活跃连接已经达到最大maxActive
+				req := make(chan connReq, 1)//这种情况下归还连接时会首先判断是否有等待使用的len(c.connReqs) >0
 				c.connReqs = append(c.connReqs, req)
 				c.mu.Unlock()
 				ret, ok := <-req
@@ -151,7 +164,7 @@ func (c *channelPool) Get() (interface{}, error) {
 				c.mu.Unlock()
 				return nil, ErrClosed
 			}
-			conn, err := c.factory()
+			conn, err := c.factory()//连接池中无可用连接， 且没有达到最大活跃连接数maxActive,则创建
 			if err != nil {
 				c.mu.Unlock()
 				return nil, err
@@ -176,7 +189,7 @@ func (c *channelPool) Put(conn interface{}) error {
 		return c.Close(conn)
 	}
 
-	if l := len(c.connReqs); l > 0 {
+	if l := len(c.connReqs); l > 0 {//首先查看是否有等待使用者， 如果有，不放入连接池中
 		req := c.connReqs[0]
 		copy(c.connReqs, c.connReqs[1:])
 		c.connReqs = c.connReqs[:l-1]
@@ -186,11 +199,11 @@ func (c *channelPool) Put(conn interface{}) error {
 		c.mu.Unlock()
 		return nil
 	} else {
-		select {
+		select {//没有急需者，则放入连接池
 		case c.conns <- &idleConn{conn: conn, t: time.Now()}:
 			c.mu.Unlock()
 			return nil
-		default:
+		default://如果之前创建的连接超过了maxIdle，则把多的部分关闭掉
 			c.mu.Unlock()
 			//连接池已满，直接关闭该连接
 			return c.Close(conn)
